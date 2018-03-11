@@ -1,16 +1,23 @@
 # recommendation for amazon data set
-
+# there are three methods I have done recommendations
+# 1. Binary ratings
+# 2. Score ratings
+# 3. Recommendarlab package
+# used libraries: 
+# 1. tm 2. qdap 3.data.table 4. Shiny 5. Recommendarlab
+############################################################################
 # setting the working directory
 datapath <- "C:/Users/c_ymelpati/Desktop/data science/data/data.world"
+# for personal lappy
+datapath <- "C:/Users/yeshu/Desktop/datascience_projects/amazon recommendation"
 setwd(datapath)
-
+#############################################################################
 # loading the data
 data <- read.csv('amazon.csv',stringsAsFactors = FALSE)
 
-## extracting the reviews colun
+#############################################################################
+## extracting the reviews column
 user_rev <- data$customer_reviews
-## reducing the size of reviews
-#user_rev <- user_rev[1:100]
 library(tm)
 ## function to clean the reviews with tm package
 basic_clean <- function(user_rev){
@@ -24,7 +31,8 @@ user_rev <- basic_clean(user_rev)
 
 # to convert all special charecters with their transalation
 user_rev <- iconv(user_rev, to = "ASCII//TRANSLIT")
-
+# to remove all stopwords in engilsh
+user_rev <- removeWords(user_rev,stopwords('en'))
 library(qdap)
 # function to clean reviews with qdap library
 clean_qdap <- function(user_rev){
@@ -41,7 +49,7 @@ clean_qdap <- function(user_rev){
 user_rev <- clean_qdap(user_rev)
 user_rev <- tolower(user_rev)
 
-# cleaning by converting to Corpus
+# cleaning by converting to Vector Corpus
 rev_sr <- VectorSource(user_rev)
 rev_cp <- VCorpus(rev_sr)
 
@@ -63,7 +71,7 @@ rev_m <- as.matrix(sparsmat)
 # calculating the frequencies of SINGLE WORDS
 term_frequency <- rowSums(rev_m)
 term_frequency <- sort(term_frequency,decreasing = TRUE)
-################ the aboe is singple term frequency ###############
+################ the above is singple term frequency ##############
 
 ###################################################################
 # for biwords frequency
@@ -96,41 +104,45 @@ indtopbiwords <- which(totalbiwords %in% topbiwords)
 # getting the matrix for these topbiwords
 topmat <- rev_f_m[indtopbiwords,]
 transtopmat <- t(topmat)
-# transtopmat is ~ genre_matrix2
+# transtopmat is products and their bi key words present or not
 #####################################################################
+# extracting the products and the ratings data frames
 products <- subset(data, select = c(uniq_id,product_name,
                                     price,customer_reviews))
-#products <- products[1:100,]
 ratings <- subset(data,select = c(uniq_id,average_review_rating))
 
-#ratings <- ratings[1:100,]
-
-
+######################################################################
+# products data frame processing
+# removing customer_reviews un processed column
 products$customer_reviews <- NULL
+# adding the transtopmat processed reviews based on bikey words
 products <- cbind(products,transtopmat)
 
-###################################################################
-### ratings 
+######################################################################
+### ratings data frame processing
+# extracting the actual rating for a product in numeric form
 ratings$average_review_rating <- as.numeric(substr(ratings$average_review_rating,1,3))
-# add user_id columns to the ratings
-
+# add user_id columns to the ratings, as users column is not present in data set
 # we will assume 100 users 
-users <- sample(1:100,nrow(products),replace = TRUE)
+users <- sample(1:100,nrow(ratings),replace = TRUE)
 ratings$user_id <- users
 # changing the colnames 
 colnames(ratings) <- c("product_id","rating","user_id")
-
 ## finding all na is rating column in ratings data frame and replace with 2
 which(is.na(ratings$rating))
-ratings[which(is.na(ratings$rating)),]$rating <- 2
 
-
+######################################################################
+# method : 1
+# binary ratings
 binaryratings <- ratings
+# changing all NA' s to value of 2
+binaryratings[which(is.na(binaryratings$rating)),]$rating <- 2
+which(is.na(binaryratings))
 ####### binary ratings start
 # getting the NA's present in binaryratings
 apply(binaryratings,2,function(x) which(is.na(x)))
 
-
+# converting to binary ratings so that A user of rated <3 is disliked by him
 for (i in 1:nrow(binaryratings)){
   if (binaryratings[i,2] > 3){
     binaryratings[i,2] <- 1
@@ -147,29 +159,30 @@ binaryratings2 <- dcast(binaryratings, product_id~user_id, value.var = "rating",
 for (i in 1:ncol(binaryratings2)){
   binaryratings2[which(is.na(binaryratings2[,i]) == TRUE),i] <- 0
 }
-# Rows are movieIds, cols are userIds
-binaryratings2 = binaryratings2[,-1] #remove movieIds col. 
+# Rows are productId, cols are userIds
+binaryratings2 = binaryratings2[,-1] #remove productId col. 
 
-#########################################################
+###################################################################
 productsIds <- length(unique(products$uniq_id)) #10000
 ratingproductIds <- length(unique(ratings$product_id)) #10000
 
 uniq_users <- length(unique(ratings$user_id))
-result = matrix(0,20,uniq_users) # here, 668=no of users/raters, 18=no of genres
+result = matrix(0,20,uniq_users) # here 20 is top bi key words and unique users are 100
 
-#Calculate dot product for User Profiles
-## for a user a movie is liked then the movie genres are summed
-## how much a user likes a genre
+## Calculate dot product for User Profiles
+## for a user a product is liked then the products bi keywords are summed
+## how much a user likes a bi key word
 for (c in 1:ncol(binaryratings2)){
   for (i in 1:ncol(transtopmat)){
     result[i,c] <- sum( (transtopmat[,i])
                         * (binaryratings2[,c]) ) #ratings per genre
   }
 }
-
-#Convert to Binary scale
+################################################################
+# Convert to Binary scale only for recommends in binary result
 # for simplicity this is made 1 or 0
-## we use median to bifurcate like for particular review
+# we use median to bifurcate like for particular review
+# this is not done for recommends by score result
 med <- median(result)
 for (c in 1:ncol(result)){
   for (i in 1:nrow(result)){
@@ -183,7 +196,8 @@ for (c in 1:ncol(result)){
 }
 
 #################################################################
-# user 1:
+# this method is after binary convert of result and matching most
+# user 1: recommendations
 result[,1]
 matched <- c()
 for( i in 1:nrow(transtopmat)){
@@ -194,21 +208,122 @@ matchdf <- data.frame(matched , c(1:nrow(transtopmat)))
 colnames(matchdf) <- c("matchsum","productId")
 attach(matchdf)
 sortmatchdf <- matchdf[order(-matchsum),]
-head(sortmatchdf)
 ind <- (head(sortmatchdf)$productId)
+# matchpercent is % how much his interest is matched with the product
 matchpercent <- (head(sortmatchdf$matchsum)/20)*100
-matchpercent
 recommended_products <- products[ind,]
 recommended_products$percentagematch <- matchpercent
 recommended_products
+#################################################################
+## method : 2
+# this method is calculating square
+# first user recommendations using his score for each bi key word
+
+ratings_without_na <- ratings
+ratings_without_na[which(is.na(ratings_without_na$rating)),]$rating <- 0
+which(is.na(ratings_without_na))
+max(ratings_without_na$rating)
+min(ratings_without_na$rating)
+score_ratings <- dcast(ratings_without_na, product_id~user_id, value.var = "rating", na.rm=FALSE)
+
+for( i in 1: ncol(score_ratings)){
+  score_ratings[which(is.na(score_ratings[,i]) == TRUE),i] <- 0
+}
+score_ratings <- score_ratings[,-1]
+score_ratings[,1] # user 1 ratings for each product
+
+score_result = matrix(0,20,uniq_users) # here 20 is top bi key words and unique users are 100
+
+## Calculate dot product for User Profiles
+## for a user a product is liked then the products bi keywords are summed
+## how much a user likes a bi key word
+for (c in 1:ncol(score_ratings)){
+  for (i in 1:ncol(transtopmat)){
+    score_result[i,c] <- sum( (transtopmat[,i])
+                        * (score_ratings[,c]) ) #ratings per genre
+  }
+}
+# user 1 recommendations:
+score_result[,1] # user 1 score for each bi key word
+scorelist <- c()
+for(i in 1:nrow(transtopmat)){
+  tempscore <- sum(transtopmat[i,] * score_result[,1])
+  scorelist <- c(scorelist,tempscore)
+}
+scoredf <- data.frame(scorelist , c(1:nrow(transtopmat)))
+colnames(scoredf) <- c('score','productId')
+attach(scoredf)
+sortscoredf <- scoredf[order(-score),]
+ind <- (head(sortscoredf)$productId)
+scoredf[ind,]
+# recommendations
+recommended_products_score <- products[ind,]
+recommended_products_score
+#################################################################
+# method 3:
+library(recommenderlab)
+lab_ratings <- dcast(ratings, user_id~product_id, value.var = "rating", na.rm=FALSE)
+lab_ratings <- lab_ratings[,-1]
+colnames(lab_ratings) <- 1:nrow(ratings)
+rownames(lab_ratings) <- paste0('user',1:100)
+
+# rows are products and columns are users
+lab_ratings<- as.matrix(lab_ratings)
+lab_real_rating <- as(lab_ratings, "realRatingMatrix")
+ratingmat_norm <- normalize(lab_real_rating)
+recommender_model <- Recommender(lab_real_rating, 
+                                 method = "POPULAR")
+model_details <- getModel(recommender_model)
+names(model_details)
 
 
-#########comparing results
+
+##################################################################
+# user 1: method 3.
+
+recom <- predict(recommender_model, 
+                 lab_real_rating[1,], 
+                 n=5) #Obtain top 5 recommendations for 1st user in dataset
+
+
+recom_list <- as(recom, 
+                 "list") #convert recommenderlab object to readable list
+recom_list
+lab_recommends <- products[as.integer(recom_list[[1]]),]
+#################################################################
+# function to make recommendations using recommendarlab package
+lab_recommendation_fun <- function(value){
+  recom <- predict(recommender_model, 
+                   lab_real_rating[value,], 
+                   n=5) #Obtain top 5 recommendations for 1st user in dataset
+  recom_list <- as(recom, 
+                   "list") #convert recommenderlab object to readable list
+  lab_recommends <- products[as.integer(recom_list[[1]]),]
+  lab_recommends
+}
+#################################################################
+## making function for recommended products by score:
+recommend_score <- function(value){
+  scorelist <- c()
+  for(i in 1:nrow(transtopmat)){
+    tempscore <- sum(transtopmat[i,] * result[,value])
+    scorelist <- c(scorelist,tempscore)
+  }
+  scoredf <- data.frame(scorelist , c(1:nrow(transtopmat)))
+  colnames(scoredf) <- c('score','productId')
+  attach(scoredf)
+  sortscoredf <- scoredf[order(-score),]
+  ind <- (head(sortscoredf)$productId)
+  # recommendations
+  recommended_products_score <- products[ind,]
+  recommended_products_score
+}
+#########comparing results ######################################
 transtopmat[ind[1],]
 result[,1]
 rbind(transtopmat[ind,],result[,1])
-####
-
+#################################################################
+# making function for reocmmend by binary result:
 recommend_function <- function(value){
   # value is the user id
   matched <- c()
@@ -227,26 +342,60 @@ recommend_function <- function(value){
   recommended_products$percentagematch <- matchpercent
   recommended_products
 }
-user2 <- recommend_function(2)
-user2
-visualizerecommend(user2)
 
+#################################################################
+#### function to recommend as display UI shiny 
+visualizerecommend(lab_recommendation_fun)
+visualizerecommend(recommend_function) # visualize binary result recommendations
+visualizerecommend(recommend_score) # visualize score result recommendation
+#################################################################
+# function to visualize UI shiny
 visualizerecommend <- function(value){
   
   library(shiny)
-  mydata <- as.data.frame(value)
   
-  # UI
+  
+  # Define UI for application that plots features of movies
   ui <- fluidPage(
-    tableOutput(outputId = "datatable")
+    
+    # Sidebar layout with a input and output definitions
+    sidebarLayout(
+      
+      # Inputs
+      sidebarPanel(
+        n_total <- 100,
+        # Text instructions
+        HTML(paste("Enter a value i.e userid between 1 and",n_total,"to get recommmends")),
+        
+        # Numeric input for sample size
+        numericInput(inputId = "n",
+                     label = "User id:",
+                     min = 1,
+                     max = n_total,
+                     value = 25,
+                     step = 1)
+        
+      ),
+      
+      # Output: Show data table
+      mainPanel(
+        DT::dataTableOutput(outputId = "recommendstable")
+      )
+    )
   )
   
-  # Define server function required to create the scatterplot-
-  server <- function(input, output, session) {
-    # Take a reactive dependency on input$button, but not on any other inputs
-    output$datatable <- renderTable({
-      mydata
+  
+  server <- function(input, output) {
+    
+    # Create data table
+    output$recommendstable <- DT::renderDataTable({
+      req(input$n)
+      recommends <- value(input$n)
+      DT::datatable(data = recommends, 
+                    options = list(pageLength = 10), 
+                    rownames = FALSE)
     })
+    
   }
   
   # Create a Shiny app object
